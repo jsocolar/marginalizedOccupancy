@@ -394,7 +394,7 @@ effectiveSize(margin.samples)
 gelman.diag(occu.samples)
 gelman.diag(margin.samples)
 ```
-The execution time is about 10-20% faster (on my machine) in the marginalized JAGS model versus the "familiar" parameterization:
+The execution time is faster in the marginalized JAGS model versus the "familiar" parameterization. On fast machines I've seen speedup as high as 19%; on my laptop (which ran the model for this document, the speedup is smaller):
 ```{r exec time}
 occu.dtime
 margin.dtime

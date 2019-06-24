@@ -788,22 +788,22 @@ stan.samples &lt;- stan(model_code = stan.model, data = stan.data, iter = 4000, 
 ##    plus standard error of the mean:
 ## 
 ##       Mean     SD Naive SE Time-series SE
-## a0 -0.1703 0.2014 0.001839       0.003743
-## a1  0.6296 0.2084 0.001903       0.003706
-## a2 -0.5836 0.1947 0.001777       0.003083
-## b0 -0.4726 0.1505 0.001374       0.003095
-## b1  0.1557 0.1361 0.001242       0.002479
-## b2  0.2799 0.1120 0.001022       0.001400
+## a0 -0.1591 0.2068 0.001888       0.004153
+## a1  0.6392 0.2182 0.001992       0.004318
+## a2 -0.5926 0.2025 0.001849       0.003542
+## b0 -0.4837 0.1566 0.001429       0.003317
+## b1  0.1552 0.1385 0.001264       0.002495
+## b2  0.2751 0.1100 0.001004       0.001383
 ## 
 ## 2. Quantiles for each variable:
 ## 
-##        2.5%      25%     50%      75%   97.5%
-## a0 -0.54646 -0.30488 -0.1742 -0.04283  0.2447
-## a1  0.23566  0.48905  0.6249  0.76454  1.0540
-## a2 -0.97964 -0.71044 -0.5762 -0.45243 -0.2208
-## b0 -0.77882 -0.57020 -0.4673 -0.36995 -0.1845
-## b1 -0.10924  0.06372  0.1545  0.24574  0.4224
-## b2  0.05949  0.20530  0.2790  0.35441  0.5013</code></pre>
+##        2.5%     25%     50%      75%   97.5%
+## a0 -0.53947 -0.2977 -0.1660 -0.03066  0.2841
+## a1  0.23589  0.4912  0.6288  0.77446  1.0983
+## a2 -1.01655 -0.7175 -0.5852 -0.45565 -0.2225
+## b0 -0.79919 -0.5866 -0.4825 -0.37850 -0.1842
+## b1 -0.11465  0.0614  0.1554  0.24905  0.4245
+## b2  0.06147  0.2014  0.2740  0.34901  0.4913</code></pre>
 <pre class="r"><code>summary(margin.samples)</code></pre>
 <pre><code>## 
 ## Iterations = 2001:5000
@@ -815,22 +815,22 @@ stan.samples &lt;- stan(model_code = stan.model, data = stan.data, iter = 4000, 
 ##    plus standard error of the mean:
 ## 
 ##       Mean     SD Naive SE Time-series SE
-## a0 -0.1622 0.2016 0.001840       0.002817
-## a1  0.6391 0.2136 0.001950       0.002853
-## a2 -0.5884 0.1989 0.001815       0.002635
-## b0 -0.4788 0.1530 0.001396       0.002387
-## b1  0.1535 0.1388 0.001267       0.002121
-## b2  0.2755 0.1105 0.001009       0.001274
+## a0 -0.1640 0.2039 0.001862       0.003000
+## a1  0.6348 0.2086 0.001904       0.002789
+## a2 -0.5898 0.1971 0.001800       0.002575
+## b0 -0.4794 0.1539 0.001405       0.002527
+## b1  0.1570 0.1371 0.001252       0.002012
+## b2  0.2782 0.1107 0.001011       0.001317
 ## 
 ## 2. Quantiles for each variable:
 ## 
 ##        2.5%      25%     50%      75%   97.5%
-## a0 -0.54632 -0.29969 -0.1670 -0.03023  0.2511
-## a1  0.23318  0.49364  0.6353  0.77732  1.0719
-## a2 -1.00504 -0.71405 -0.5796 -0.45187 -0.2231
-## b0 -0.78622 -0.57981 -0.4746 -0.37505 -0.1896
-## b1 -0.12016  0.06132  0.1538  0.24800  0.4237
-## b2  0.06071  0.20096  0.2749  0.35040  0.4923</code></pre>
+## a0 -0.55075 -0.30105 -0.1698 -0.03371  0.2521
+## a1  0.24148  0.49430  0.6306  0.76857  1.0596
+## a2 -1.00384 -0.71464 -0.5818 -0.45778 -0.2214
+## b0 -0.79100 -0.58209 -0.4763 -0.37512 -0.1846
+## b1 -0.10939  0.06387  0.1559  0.25101  0.4263
+## b2  0.06263  0.20316  0.2781  0.35261  0.4930</code></pre>
 <pre class="r"><code>summary(stan.samples, pars = c('a0', 'a1', 'a2', 'b0', 'b1', 'b2'))$summary</code></pre>
 <pre><code>##          mean     se_mean        sd        2.5%         25%        50%
 ## a0 -0.1630244 0.002405505 0.2019953 -0.54032285 -0.29956729 -0.1705802
@@ -849,19 +849,19 @@ stan.samples &lt;- stan(model_code = stan.model, data = stan.data, iter = 4000, 
 <p>The effective sample sizes and r-hat (Gelman-Rubin) diagnostics are generally better in the marginalized JAGS model verus the “familiar” parameterization:</p>
 <pre class="r"><code>effectiveSize(occu.samples)</code></pre>
 <pre><code>##       a0       a1       a2       b0       b1       b2 
-## 2964.158 3179.491 4000.845 2385.145 3032.693 6396.075</code></pre>
+## 2526.437 2618.865 3310.651 2248.084 3115.240 6328.062</code></pre>
 <pre class="r"><code>effectiveSize(margin.samples)</code></pre>
 <pre><code>##       a0       a1       a2       b0       b1       b2 
-## 5143.261 5637.824 5757.205 4111.503 4317.414 7530.518</code></pre>
+## 4677.202 5601.321 6000.460 3724.649 4684.516 7123.063</code></pre>
 <pre class="r"><code>gelman.diag(occu.samples)</code></pre>
 <pre><code>## Potential scale reduction factors:
 ## 
 ##    Point est. Upper C.I.
-## a0          1       1.01
-## a1          1       1.00
+## a0          1       1.00
+## a1          1       1.01
 ## a2          1       1.00
 ## b0          1       1.01
-## b1          1       1.00
+## b1          1       1.01
 ## b2          1       1.00
 ## 
 ## Multivariate psrf
@@ -881,16 +881,16 @@ stan.samples &lt;- stan(model_code = stan.model, data = stan.data, iter = 4000, 
 ## Multivariate psrf
 ## 
 ## 1</code></pre>
-<p>The execution time is about 10-20% faster (on my machine) in the marginalized JAGS model versus the “familiar” parameterization:</p>
+<p>The execution time is faster in the marginalized JAGS model versus the “familiar” parameterization. On fast machines I’ve seen speedup as high as 19%; on my laptop (which ran the model for this document, the speedup is smaller):</p>
 <pre class="r"><code>occu.dtime</code></pre>
 <pre><code>##    user  system elapsed 
-##   0.092   0.035  67.242</code></pre>
+##   0.123   0.126  72.490</code></pre>
 <pre class="r"><code>margin.dtime</code></pre>
 <pre><code>##    user  system elapsed 
-##   0.040   0.018  68.190</code></pre>
+##   0.046   0.032  63.760</code></pre>
 <pre class="r"><code>(margin.dtime - occu.dtime)/occu.dtime</code></pre>
-<pre><code>##        user      system     elapsed 
-## -0.60465116 -0.62962963  0.01409833</code></pre>
+<pre><code>##       user     system    elapsed 
+## -0.4610169 -0.6554622 -0.1204304</code></pre>
 </div>
 </div>
 <div class="footnotes">
