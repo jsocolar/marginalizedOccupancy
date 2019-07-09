@@ -376,7 +376,7 @@ $(document).ready(function () {
 
 <h1 class="title toc-ignore">Marginalized occupancy models: a how-to for JAGS and Stan</h1>
 <h4 class="author">Jacob Socolar</h4>
-<h4 class="date">6/23/2019</h4>
+<h4 class="date">6/23/2019, updated 7-9-2019</h4>
 
 </div>
 
@@ -384,7 +384,7 @@ $(document).ready(function () {
 <div id="introduction" class="section level2">
 <h2>Introduction</h2>
 <p>Stan doesn’t allow discrete unknown parameters in its models<a href="#fn1" class="footnote-ref" id="fnref1"><sup>1</sup></a>. This limitation<a href="#fn2" class="footnote-ref" id="fnref2"><sup>2</sup></a> prevents us from fitting occupancy models under the familiar parameterization that we might have first learned from one of Marc Kery’s excellent books. The issue is that the unknown occupancy states (the Z-matrix in community models) are discrete, and this is not allowed in Stan.</p>
-<p>The solution is to marginalize out the discrete occupancy states. There are a few pages floating around the web that show us how to do this. I initially found those pages frustrating to understand, which is my motivation for writing this up. The <a href="https://fukamilab.github.io/BIO202/09-C-occupancy-models.html">Fukami Lab page</a> doesn’t really explain where the marginalization happens or how it works (to be fair, the point of that page is not to explain marginalization, so no complaint!). <a href="https://mc-stan.org/users/documentation/case-studies/dorazio-royle-occupancy.html">Bob Carpenter’s translation</a> of the <a href="http://www.uvm.edu/rsenr/vtcfwru/spreadsheets/occupancy/Occupancy%20Exercises/Exercise15/Dorazio_et_al_2006.pdf">Dorazio data-augmented multi-species model</a> does the marginalization very quickly in heavy math symbology, and moreover relies on a lack of visit-specific detectability covariates to do so.</p>
+<p>The solution is to marginalize out the discrete occupancy states. There are a few pages floating around the web that show us how to do this. I initially found those pages frustrating to understand, which is my motivation for writing this up. The <a href="https://fukamilab.github.io/BIO202/09-C-occupancy-models.html">Fukami Lab page</a> doesn’t really explain where the marginalization happens or how it works. <a href="https://mc-stan.org/users/documentation/case-studies/dorazio-royle-occupancy.html">Bob Carpenter’s translation</a> of the <a href="http://www.uvm.edu/rsenr/vtcfwru/spreadsheets/occupancy/Occupancy%20Exercises/Exercise15/Dorazio_et_al_2006.pdf">Dorazio data-augmented multi-species model</a> does the marginalization very quickly in heavy math symbology, and moreover relies on a lack of visit-specific detectability covariates to do so. To be fair, neither of these pages’ main purpose is to explain marginalization for beginners, so no complaint!</p>
 <p>What I really wanted was a satisfying explanation of the marginalization written in JAGS/BUGS language first, and translated to Stan second. That’s what I’ve tried to produce here. We’ll start with the likelihood for a single-species, single-season model in JAGS. Then we’ll marginalize, still in JAGS. Then we’ll translate to Stan<a href="#fn3" class="footnote-ref" id="fnref3"><sup>3</sup></a>. We’ll write the Stan implementation in such a way that it’s pretty clear how to generalize to a multi-species model. Once the reader is comfortable with the multi-species model in Stan, she should be able to follow Bob Carpenter’s data-augmented version, even if she requires visit-specific detection covariates.</p>
 </div>
 <div id="the-familiar-jagsbugs-model" class="section level2">
@@ -444,7 +444,7 @@ for(i in (N+1):n.site){
 }</code></pre>
 <p>Note that there are no <span class="math inline">\(Z\)</span>’s in this likelihood!</p>
 <p>In my view, the key trick in the marginalization is splitting the likelihood at sites without detections into separate cases for <span class="math inline">\(Z == 1\)</span> and <span class="math inline">\(Z == 0\)</span>, and then writing down a single statement that subsumes both paths towards observing a zero. Syntactically, this shows up as the elimination of sampling statements from the for-loop over the visits (the j-indexed for-loop over visits exists only to compute theta)<a href="#fn8" class="footnote-ref" id="fnref8"><sup>8</sup></a>. The crux of the marginalization is to remove <span class="math inline">\(Z\)</span> while nevertheless ensuring that the likelihood of the data for a single site cannot receive simultaneous contributions from <span class="math inline">\(Z == 0\)</span> on one visit and <span class="math inline">\(Z == 1\)</span> on another visit.</p>
-<p>Once we fit the model, we can still recover our posterior Z-matrix. Posterior <span class="math inline">\(Z\)</span> is one at every site with at least one detection, and <span class="math inline">\(Z ~ dbern(psi[i])\)</span> at every other site. So we just monitor <span class="math inline">\(psi[i]\)</span> and compute the Z-matrix post-hoc.</p>
+<p>Once we fit the model, we can still recover our posterior Z-matrix. Posterior <span class="math inline">\(Z\)</span> is one at every site with at least one detection. At every other site, the likelihood for <span class="math inline">\(Z == 1\)</span> is <span class="math inline">\(\psi_i * \prod_{j = 1}^{n.visit} (1 - \theta_{ij})\)</span>, whereas the likelihood for <span class="math inline">\(Z == 0\)</span> is <span class="math inline">\(1 - \psi_i\)</span>. Thus, posterior Z is one with probability <span class="math inline">\(\frac{\psi_i * \prod_{j = 1}^{n.visit} (1 - \theta_{ij})}{(1 - \psi_i) + \psi_i * \prod_{j = 1}^{n.visit} (1 - \theta_{ij})}\)</span> and zero otherwise. So we just monitor <code>psi</code> and <code>theta</code> and compute the Z-matrix post-hoc.</p>
 </div>
 </div>
 <div id="the-stan-model" class="section level2">
@@ -526,15 +526,9 @@ for(i in 1:n.site){
 </div>
 <div id="jags-analysis-not-marginalized" class="section level3">
 <h3>JAGS analysis: not marginalized</h3>
-<pre class="r"><code>library(rjags)</code></pre>
-<pre><code>## Loading required package: coda</code></pre>
-<pre><code>## Linked to JAGS 4.3.0</code></pre>
-<pre><code>## Loaded modules: basemod,bugs</code></pre>
-<pre class="r"><code>library(dclone)</code></pre>
-<pre><code>## Loading required package: parallel</code></pre>
-<pre><code>## Loading required package: Matrix</code></pre>
-<pre><code>## dclone 2.3-0      2019-03-21</code></pre>
-<pre class="r"><code>set.seed(3)
+<pre class="r"><code>library(rjags)
+library(dclone)
+set.seed(3)
 occu.model &lt;- function() {
   # Priors
   a0 ~ dnorm(0,0.001)
@@ -582,38 +576,11 @@ thin &lt;- 1
 occu.start.time = proc.time()
 cl &lt;- makePSOCKcluster(nc)
 tmp &lt;- clusterEvalQ(cl, library(dclone))
-parLoadModule(cl, &quot;glm&quot;)</code></pre>
-<pre><code>## [[1]]
-## NULL
-## 
-## [[2]]
-## NULL
-## 
-## [[3]]
-## NULL
-## 
-## [[4]]
-## NULL</code></pre>
-<pre class="r"><code>parListModules(cl)</code></pre>
-<pre><code>## [[1]]
-## [1] &quot;basemod&quot; &quot;bugs&quot;    &quot;glm&quot;    
-## 
-## [[2]]
-## [1] &quot;basemod&quot; &quot;bugs&quot;    &quot;glm&quot;    
-## 
-## [[3]]
-## [1] &quot;basemod&quot; &quot;bugs&quot;    &quot;glm&quot;    
-## 
-## [[4]]
-## [1] &quot;basemod&quot; &quot;bugs&quot;    &quot;glm&quot;</code></pre>
-<pre class="r"><code>occu.samples &lt;- jags.parfit(cl, jags.data, params, occu.model, inits=inits, n.chains=nc, 
-                                     n.adapt=n.adapt, n.update = n.burn, thin = thin, n.iter = n.iter)</code></pre>
-<pre><code>## Registered S3 method overwritten by 'R2WinBUGS':
-##   method            from  
-##   as.mcmc.list.bugs dclone</code></pre>
-<pre><code>## 
-## Parallel computation in progress</code></pre>
-<pre class="r"><code>stopCluster(cl)
+parLoadModule(cl, &quot;glm&quot;)
+parListModules(cl)
+occu.samples &lt;- jags.parfit(cl, jags.data, params, occu.model, inits=inits, n.chains=nc, 
+                                     n.adapt=n.adapt, n.update = n.burn, thin = thin, n.iter = n.iter)
+stopCluster(cl)
 occu.end.time = proc.time()
 occu.dtime = occu.end.time - occu.start.time</code></pre>
 </div>
@@ -679,54 +646,18 @@ thin &lt;- 1
 margin.start.time = proc.time()
 cl &lt;- makePSOCKcluster(nc)
 tmp &lt;- clusterEvalQ(cl, library(dclone))
-parLoadModule(cl, &quot;glm&quot;)</code></pre>
-<pre><code>## [[1]]
-## NULL
-## 
-## [[2]]
-## NULL
-## 
-## [[3]]
-## NULL
-## 
-## [[4]]
-## NULL</code></pre>
-<pre class="r"><code>parListModules(cl)</code></pre>
-<pre><code>## [[1]]
-## [1] &quot;basemod&quot; &quot;bugs&quot;    &quot;glm&quot;    
-## 
-## [[2]]
-## [1] &quot;basemod&quot; &quot;bugs&quot;    &quot;glm&quot;    
-## 
-## [[3]]
-## [1] &quot;basemod&quot; &quot;bugs&quot;    &quot;glm&quot;    
-## 
-## [[4]]
-## [1] &quot;basemod&quot; &quot;bugs&quot;    &quot;glm&quot;</code></pre>
-<pre class="r"><code>margin.samples &lt;- jags.parfit(cl, jags.data, params, margin.model, inits=inits, n.chains=nc, 
-                            n.adapt=n.adapt, n.update = n.burn, thin = thin, n.iter = n.iter)</code></pre>
-<pre><code>## 
-## Parallel computation in progress</code></pre>
-<pre class="r"><code>stopCluster(cl)
+parLoadModule(cl, &quot;glm&quot;)
+parListModules(cl)
+margin.samples &lt;- jags.parfit(cl, jags.data, params, margin.model, inits=inits, n.chains=nc, 
+                            n.adapt=n.adapt, n.update = n.burn, thin = thin, n.iter = n.iter)
+stopCluster(cl)
 margin.end.time = proc.time()
 margin.dtime = margin.end.time - margin.start.time</code></pre>
 </div>
 <div id="stan-analysis" class="section level3">
 <h3>Stan analysis</h3>
-<pre class="r"><code>library(rstan)</code></pre>
-<pre><code>## Loading required package: ggplot2</code></pre>
-<pre><code>## Loading required package: StanHeaders</code></pre>
-<pre><code>## rstan (Version 2.18.2, GitRev: 2e1f913d3ca3)</code></pre>
-<pre><code>## For execution on a local, multicore CPU with excess RAM we recommend calling
-## options(mc.cores = parallel::detectCores()).
-## To avoid recompilation of unchanged Stan programs, we recommend calling
-## rstan_options(auto_write = TRUE)</code></pre>
-<pre><code>## 
-## Attaching package: 'rstan'</code></pre>
-<pre><code>## The following object is masked from 'package:coda':
-## 
-##     traceplot</code></pre>
-<pre class="r"><code>stan.model &lt;- 'data {
+<pre class="r"><code>library(rstan)
+stan.model &lt;- 'data {
   int&lt;lower=0&gt; n_site; //number of sites
   int&lt;lower=0&gt; n_visit; //number of visits
   int&lt;lower=0, upper=1&gt; det_data[n_site, n_visit]; //detection history
@@ -788,22 +719,22 @@ stan.samples &lt;- stan(model_code = stan.model, data = stan.data, iter = 4000, 
 ##    plus standard error of the mean:
 ## 
 ##       Mean     SD Naive SE Time-series SE
-## a0 -0.1591 0.2068 0.001888       0.004153
-## a1  0.6392 0.2182 0.001992       0.004318
-## a2 -0.5926 0.2025 0.001849       0.003542
-## b0 -0.4837 0.1566 0.001429       0.003317
-## b1  0.1552 0.1385 0.001264       0.002495
-## b2  0.2751 0.1100 0.001004       0.001383
+## a0 -0.1668 0.2063 0.001883       0.003850
+## a1  0.6328 0.2157 0.001969       0.003913
+## a2 -0.5895 0.1957 0.001786       0.003139
+## b0 -0.4777 0.1527 0.001394       0.003165
+## b1  0.1584 0.1382 0.001261       0.002494
+## b2  0.2778 0.1113 0.001016       0.001395
 ## 
 ## 2. Quantiles for each variable:
 ## 
-##        2.5%     25%     50%      75%   97.5%
-## a0 -0.53947 -0.2977 -0.1660 -0.03066  0.2841
-## a1  0.23589  0.4912  0.6288  0.77446  1.0983
-## a2 -1.01655 -0.7175 -0.5852 -0.45565 -0.2225
-## b0 -0.79919 -0.5866 -0.4825 -0.37850 -0.1842
-## b1 -0.11465  0.0614  0.1554  0.24905  0.4245
-## b2  0.06147  0.2014  0.2740  0.34901  0.4913</code></pre>
+##        2.5%      25%     50%      75%   97.5%
+## a0 -0.54459 -0.30352 -0.1739 -0.03844  0.2594
+## a1  0.22950  0.48830  0.6253  0.77018  1.0803
+## a2 -0.98997 -0.71513 -0.5830 -0.45857 -0.2211
+## b0 -0.78593 -0.57850 -0.4743 -0.37446 -0.1852
+## b1 -0.10987  0.06448  0.1592  0.25013  0.4295
+## b2  0.06033  0.20233  0.2770  0.35199  0.4972</code></pre>
 <pre class="r"><code>summary(margin.samples)</code></pre>
 <pre><code>## 
 ## Iterations = 2001:5000
@@ -815,53 +746,53 @@ stan.samples &lt;- stan(model_code = stan.model, data = stan.data, iter = 4000, 
 ##    plus standard error of the mean:
 ## 
 ##       Mean     SD Naive SE Time-series SE
-## a0 -0.1640 0.2039 0.001862       0.003000
-## a1  0.6348 0.2086 0.001904       0.002789
-## a2 -0.5898 0.1971 0.001800       0.002575
-## b0 -0.4794 0.1539 0.001405       0.002527
-## b1  0.1570 0.1371 0.001252       0.002012
-## b2  0.2782 0.1107 0.001011       0.001317
+## a0 -0.1685 0.2032 0.001855       0.002887
+## a1  0.6367 0.2113 0.001929       0.002969
+## a2 -0.5859 0.1946 0.001776       0.002444
+## b0 -0.4763 0.1531 0.001397       0.002402
+## b1  0.1538 0.1377 0.001257       0.002028
+## b2  0.2775 0.1126 0.001028       0.001353
 ## 
 ## 2. Quantiles for each variable:
 ## 
 ##        2.5%      25%     50%      75%   97.5%
-## a0 -0.55075 -0.30105 -0.1698 -0.03371  0.2521
-## a1  0.24148  0.49430  0.6306  0.76857  1.0596
-## a2 -1.00384 -0.71464 -0.5818 -0.45778 -0.2214
-## b0 -0.79100 -0.58209 -0.4763 -0.37512 -0.1846
-## b1 -0.10939  0.06387  0.1559  0.25101  0.4263
-## b2  0.06263  0.20316  0.2781  0.35261  0.4930</code></pre>
+## a0 -0.55208 -0.30487 -0.1736 -0.03722  0.2488
+## a1  0.25017  0.48922  0.6310  0.77579  1.0736
+## a2 -0.99127 -0.70953 -0.5773 -0.45270 -0.2257
+## b0 -0.77638 -0.58045 -0.4734 -0.37179 -0.1781
+## b1 -0.11182  0.06061  0.1541  0.24688  0.4219
+## b2  0.05996  0.20123  0.2753  0.35137  0.5041</code></pre>
 <pre class="r"><code>summary(stan.samples, pars = c('a0', 'a1', 'a2', 'b0', 'b1', 'b2'))$summary</code></pre>
 <pre><code>##          mean     se_mean        sd        2.5%         25%        50%
-## a0 -0.1630244 0.002405505 0.2019953 -0.54032285 -0.29956729 -0.1705802
-## a1  0.6379096 0.002279334 0.2149855  0.23703620  0.49196161  0.6339170
-## a2 -0.5942064 0.002091084 0.1978393 -1.01336381 -0.71927922 -0.5858090
-## b0 -0.4808545 0.001842214 0.1539301 -0.78854690 -0.58434776 -0.4783577
-## b1  0.1553628 0.001532729 0.1394972 -0.11443810  0.06183842  0.1547717
-## b2  0.2770572 0.001130959 0.1099096  0.06329704  0.20323025  0.2765434
-##            75%      97.5%    n_eff      Rhat
-## a0 -0.03410572  0.2505590 7051.317 0.9999831
-## a1  0.77566322  1.0847608 8896.153 0.9999840
-## a2 -0.45733611 -0.2324398 8951.221 0.9996129
-## b0 -0.37589334 -0.1882665 6981.790 0.9998432
-## b1  0.24548916  0.4333297 8283.243 1.0005086
-## b2  0.35051592  0.4927109 9444.480 0.9999135</code></pre>
+## a0 -0.1626243 0.002193053 0.2014183 -0.54666278 -0.29701201 -0.1694955
+## a1  0.6379032 0.002294689 0.2148382  0.23349121  0.48960223  0.6285395
+## a2 -0.5892978 0.002067211 0.1963884 -0.99680819 -0.71557615 -0.5812635
+## b0 -0.4811580 0.001730436 0.1532074 -0.78024178 -0.58245710 -0.4805816
+## b1  0.1567425 0.001437112 0.1373855 -0.10839888  0.06061739  0.1549959
+## b2  0.2790928 0.001118686 0.1119941  0.06210818  0.20410113  0.2771369
+##            75%      97.5%     n_eff      Rhat
+## a0 -0.03783685  0.2574724  8435.282 0.9999507
+## a1  0.77843557  1.0819310  8765.473 1.0000718
+## a2 -0.45405548 -0.2259494  9025.314 0.9999146
+## b0 -0.38085255 -0.1850518  7838.775 0.9998840
+## b1  0.24996941  0.4251791  9139.045 1.0001419
+## b2  0.35418718  0.5005714 10022.441 0.9998465</code></pre>
 <p>The effective sample sizes and r-hat (Gelman-Rubin) diagnostics are generally better in the marginalized JAGS model verus the “familiar” parameterization:</p>
 <pre class="r"><code>effectiveSize(occu.samples)</code></pre>
 <pre><code>##       a0       a1       a2       b0       b1       b2 
-## 2526.437 2618.865 3310.651 2248.084 3115.240 6328.062</code></pre>
+## 2911.311 3137.325 3888.757 2356.468 3092.461 6570.295</code></pre>
 <pre class="r"><code>effectiveSize(margin.samples)</code></pre>
 <pre><code>##       a0       a1       a2       b0       b1       b2 
-## 4677.202 5601.321 6000.460 3724.649 4684.516 7123.063</code></pre>
+## 5000.131 5090.954 6364.942 4082.330 4644.523 6928.157</code></pre>
 <pre class="r"><code>gelman.diag(occu.samples)</code></pre>
 <pre><code>## Potential scale reduction factors:
 ## 
 ##    Point est. Upper C.I.
-## a0          1       1.00
-## a1          1       1.01
+## a0          1       1.01
+## a1          1       1.00
 ## a2          1       1.00
 ## b0          1       1.01
-## b1          1       1.01
+## b1          1       1.00
 ## b2          1       1.00
 ## 
 ## Multivariate psrf
@@ -881,16 +812,16 @@ stan.samples &lt;- stan(model_code = stan.model, data = stan.data, iter = 4000, 
 ## Multivariate psrf
 ## 
 ## 1</code></pre>
-<p>The execution time is faster in the marginalized JAGS model versus the “familiar” parameterization. On fast machines I’ve seen speedup as high as 19%; on my laptop (which ran the model for this document, the speedup is smaller):</p>
+<p>The execution time is faster in the marginalized JAGS model versus the “familiar” parameterization. On different runs and different machines, I’ve seen speedup between 5 and 19 percent, which means that for some parameters the “familiar” JAGS model takes twice as long per effective sample as the marginalized model.</p>
 <pre class="r"><code>occu.dtime</code></pre>
 <pre><code>##    user  system elapsed 
-##   0.123   0.126  72.490</code></pre>
+##   0.045   0.012  14.304</code></pre>
 <pre class="r"><code>margin.dtime</code></pre>
 <pre><code>##    user  system elapsed 
-##   0.046   0.032  63.760</code></pre>
+##   0.017   0.010  12.363</code></pre>
 <pre class="r"><code>(margin.dtime - occu.dtime)/occu.dtime</code></pre>
 <pre><code>##       user     system    elapsed 
-## -0.4610169 -0.6554622 -0.1204304</code></pre>
+## -0.6666667  0.2222222 -0.1356963</code></pre>
 </div>
 </div>
 <div class="footnotes">
@@ -904,7 +835,7 @@ stan.samples &lt;- stan(model_code = stan.model, data = stan.data, iter = 4000, 
 <li id="fn6"><p>It’s weird to talk about occupancy being independent of detection, but remember that in these models the detection probabilities are conditional on occupancy. And indeed <span class="math inline">\(p(det) = p(det|occ)*p(occ)\)</span>, so we see we’re on safe footing to multiply the occupancy and conditional detection probabilities.<a href="#fnref6" class="footnote-back">↩</a></p></li>
 <li id="fn7"><p>The probabilities of mutually exclusive events add. In this case, <span class="math inline">\(Z == 1\)</span> and <span class="math inline">\(Z == 0\)</span> are indeed mutually exclusive.<a href="#fnref7" class="footnote-back">↩</a></p></li>
 <li id="fn8"><p>In Bob Carpenter’s translation of the Dorazio model, this is achieved by modeling the sum of detections over all visits as a sample from a binomial distribution–a nifty trick if there are no visit-specific covariates to worry about!<a href="#fnref8" class="footnote-back">↩</a></p></li>
-<li id="fn9"><p>Or close enough. For all I know there might be efficiency gains to be had by doing everything on one line (incrementing the log-posterior once instead of multiple times), but if these exist they will be inconsequential for present purposes.<a href="#fnref9" class="footnote-back">↩</a></p></li>
+<li id="fn9"><p>Or close enough. For all I know there might be efficiency gains to be had by doing everything on one line (incrementing the log-likelihood once instead of multiple times), but if these exist they will be inconsequential for present purposes.<a href="#fnref9" class="footnote-back">↩</a></p></li>
 <li id="fn10"><p>It should be obvious why we don’t want to rely on sorting the sites for the multi-species model, where different species will be detected at different sites. Yes, we <em>could</em> pass a complex data structure where every species has its own covariate tables that are properly sorted for that species’ detection history, but the ‘if’ statement makes things <em>so</em> much easier.<a href="#fnref10" class="footnote-back">↩</a></p></li>
 </ol>
 </div>

@@ -1,7 +1,7 @@
 ---
 title: "Marginalized occupancy models: a how-to for JAGS and Stan"
 author: "Jacob Socolar"
-date: "6/23/2019"
+date: "6/23/2019, updated 7-9-2019"
 knit: (function(input_file, encoding) {
   out_dir <- 'docs';
   rmarkdown::render(input_file,
@@ -14,7 +14,7 @@ output: html_document
 
 Stan doesn’t allow discrete unknown parameters in its models[^1].  This limitation[^2] prevents us from fitting occupancy models under the familiar parameterization that we might have first learned from one of Marc Kery’s excellent books. The issue is that the unknown occupancy states (the Z-matrix in community models) are discrete, and this is not allowed in Stan.
 
-The solution is to marginalize out the discrete occupancy states. There are a few pages floating around the web that show us how to do this. I initially found those pages frustrating to understand, which is my motivation for writing this up. The [Fukami Lab page](https://fukamilab.github.io/BIO202/09-C-occupancy-models.html) doesn’t really explain where the marginalization happens or how it works (to be fair, the point of that page is not to explain marginalization, so no complaint!). [Bob Carpenter’s translation](https://mc-stan.org/users/documentation/case-studies/dorazio-royle-occupancy.html) of the [Dorazio data-augmented multi-species model](http://www.uvm.edu/rsenr/vtcfwru/spreadsheets/occupancy/Occupancy%20Exercises/Exercise15/Dorazio_et_al_2006.pdf) does the marginalization very quickly in heavy math symbology, and moreover relies on a lack of visit-specific detectability covariates to do so.
+The solution is to marginalize out the discrete occupancy states. There are a few pages floating around the web that show us how to do this. I initially found those pages frustrating to understand, which is my motivation for writing this up. The [Fukami Lab page](https://fukamilab.github.io/BIO202/09-C-occupancy-models.html) doesn’t really explain where the marginalization happens or how it works. [Bob Carpenter’s translation](https://mc-stan.org/users/documentation/case-studies/dorazio-royle-occupancy.html) of the [Dorazio data-augmented multi-species model](http://www.uvm.edu/rsenr/vtcfwru/spreadsheets/occupancy/Occupancy%20Exercises/Exercise15/Dorazio_et_al_2006.pdf) does the marginalization very quickly in heavy math symbology, and moreover relies on a lack of visit-specific detectability covariates to do so. To be fair, neither of these pages' main purpose is to explain marginalization for beginners, so no complaint!
 
 What I really wanted was a satisfying explanation of the marginalization written in JAGS/BUGS language first, and translated to Stan second.  That’s what I’ve tried to produce here. We’ll start with the likelihood for a single-species, single-season model in JAGS.  Then we’ll marginalize, still in JAGS.  Then we’ll translate to Stan[^3]. We’ll write the Stan implementation in such a way that it’s pretty clear how to generalize to a multi-species model. Once the reader is comfortable with the multi-species model in Stan, she should be able to follow Bob Carpenter’s data-augmented version, even if she requires visit-specific detection covariates.
 
@@ -101,8 +101,7 @@ Note that there are no $Z$'s in this likelihood!
 
 In my view, the key trick in the marginalization is splitting the likelihood at sites without detections into separate cases for $Z == 1$ and $Z == 0$, and then writing down a single statement that subsumes both paths towards observing a zero. Syntactically, this shows up as the elimination of sampling statements from the for-loop over the visits (the j-indexed for-loop over visits exists only to compute theta)[^8]. The crux of the marginalization is to remove $Z$ while nevertheless ensuring that the likelihood of the data for a single site cannot receive simultaneous contributions from $Z == 0$ on one visit and $Z == 1$ on another visit.
 
-Once we fit the model, we can still recover our posterior Z-matrix.  Posterior $Z$ is one at every site with at least one detection, and $Z ~ dbern(psi[i])$ at every other site.  So we just monitor $psi[i]$ and compute the Z-matrix post-hoc.
-
+Once we fit the model, we can still recover our posterior Z-matrix.  Posterior $Z$ is one at every site with at least one detection. At every other site, the likelihood for $Z == 1$ is $\psi_i * \prod_{j = 1}^{n.visit} (1 - \theta_{ij})$, whereas the likelihood for $Z == 0$ is $1 - \psi_i$. Thus, posterior Z is one with probability $\frac{\psi_i * \prod_{j = 1}^{n.visit} (1 - \theta_{ij})}{(1 - \psi_i) + \psi_i * \prod_{j = 1}^{n.visit} (1 - \theta_{ij})}$ and zero otherwise.  So we just monitor `psi` and `theta` and compute the Z-matrix post-hoc.
 
 [^4]: We can add the probabilities of mutually exclusive events to find the probability that exactly one of the events occurs.  In this case, two mutually exclusive events are **1)** [observed data AND $Z == 0$] and **2)** [observed data AND $Z == 1$]. Note that in addition to being mutually exclusive, these events are the only two ways that our observed data could have arisen, so the sum of these probabilities equals the likelihood of the observed data.
 [^5]: This is true by assumption in all "garden-variety" occupancy models.
@@ -155,7 +154,7 @@ for(i in 1:n_site){
 ```
 Above, the first `target +=` statement is the `1 ~ dbern(psi)` statement; the second `target +=` is the `det.data[i,j] ~ dbern(theta[i,j])` statement; and the third `target +=` is the full contribution to the likelihood for a site where $Q[i] == 0$. The function `log_sum_exp()` takes two arguments.  Here, the first argument captures the contribution of the $Z == 1$ possibility, and the second argument captures the contribution of the $Z == 0$ possibility.
 
-[^9]: Or close enough. For all I know there might be efficiency gains to be had by doing everything on one line (incrementing the log-posterior once instead of multiple times), but if these exist they will be inconsequential for present purposes.
+[^9]: Or close enough. For all I know there might be efficiency gains to be had by doing everything on one line (incrementing the log-likelihood once instead of multiple times), but if these exist they will be inconsequential for present purposes.
 [^10]: It should be obvious why we don’t want to rely on sorting the sites for the multi-species model, where different species will be detected at different sites. Yes, we *could* pass a complex data structure where every species has its own covariate tables that are properly sorted for that species’ detection history, but the ‘if’ statement makes things *so* much easier.
 
 ## Testing and benchmarking the parameterizations
@@ -200,7 +199,7 @@ for(i in 1:n.site){
 }
 ```
 ### JAGS analysis: not marginalized
-```{r Familiar JAGS analysis}
+```{r echo = T, results = 'hide', message = F}
 library(rjags)
 library(dclone)
 set.seed(3)
@@ -260,7 +259,7 @@ occu.end.time = proc.time()
 occu.dtime = occu.end.time - occu.start.time
 ```
 ### JAGS analysis: marginalized
-```{r Marginalized Jags}
+```{r echo = T, results = 'hide', message = F}
 # First we sort the data so that sites with a detection come first
 N <- sum(rowSums(det.data) > 0)
 neworder <- rev(order(rowSums(det.data)))
@@ -330,7 +329,7 @@ margin.end.time = proc.time()
 margin.dtime = margin.end.time - margin.start.time
 ```
 ### Stan analysis
-```{r Stan model}
+```{r echo = T, results = 'hide', message = F}
 library(rstan)
 stan.model <- 'data {
   int<lower=0> n_site; //number of sites
@@ -394,7 +393,7 @@ effectiveSize(margin.samples)
 gelman.diag(occu.samples)
 gelman.diag(margin.samples)
 ```
-The execution time is faster in the marginalized JAGS model versus the "familiar" parameterization. On fast machines I've seen speedup as high as 19%; on my laptop (which ran the model for this document, the speedup is smaller):
+The execution time is faster in the marginalized JAGS model versus the "familiar" parameterization. On different runs and different machines, I've seen speedup between 5 and 19 percent, which means that for some parameters the "familiar" JAGS model takes twice as long per effective sample as the marginalized model.
 ```{r exec time}
 occu.dtime
 margin.dtime
