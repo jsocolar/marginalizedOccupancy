@@ -12,7 +12,7 @@ output: html_document
 
 ## Introduction
 
-Stan doesn’t allow discrete unknown parameters in its models[^1].  This limitation[^2] prevents us from fitting occupancy models under the familiar parameterization that we might have first learned from one of Marc Kery’s excellent books. The issue is that the unknown occupancy states (the Z-matrix in community models) are discrete, and this is not allowed in Stan.
+Stan doesn’t allow discrete unknown parameters in its models[^1].  This limitation[^2] prevents us from fitting occupancy models under the parameterization commonly used by modelers in JAGS, including in Marc Kery’s excellent books. The issue is that the unknown occupancy states (the Z-matrix in community models) are discrete, and this is not allowed in Stan.
 
 The solution is to marginalize out the discrete occupancy states. There are a few pages floating around the web that show us how to do this. I initially found those pages frustrating to understand, which is my motivation for writing this up. The [Fukami Lab page](https://fukamilab.github.io/BIO202/09-C-occupancy-models.html) doesn’t really explain where the marginalization happens or how it works. [Bob Carpenter’s translation](https://mc-stan.org/users/documentation/case-studies/dorazio-royle-occupancy.html) of the [Dorazio data-augmented multi-species model](http://www.uvm.edu/rsenr/vtcfwru/spreadsheets/occupancy/Occupancy%20Exercises/Exercise15/Dorazio_et_al_2006.pdf) does the marginalization very quickly in heavy math symbology, and moreover relies on a lack of visit-specific detectability covariates to do so. To be fair, neither of these pages' main purpose is to explain marginalization for beginners, so no complaint!
 
@@ -26,45 +26,45 @@ What I really wanted was a satisfying explanation of the marginalization written
 
 The familiar parameterization of the single-species, single-season occupancy model has a likelihood of the following form:
 ```{r familiar JAGS likelihood, eval = F}
-for(i in 1:n.site){
+for(i in 1:n_unit){
   Z[i] ~ dbern(psi[i])                                       # Line A
   logit(psi[i]) <- a0 + a1*cov1[i] + a2*cov2[i]
-  for(j in 1:n.visit){
-    det.data[i,j] ~ dbern(Z[i]*theta[i,j])                   # Line B
+  for(j in 1:n_visit){
+    det_data[i,j] ~ dbern(Z[i]*theta[i,j])                   # Line B
     logit(theta[i,j]) <- b0 + b1*cov1[i] + b2*cov3[i,j]
   }
 }
 
 ```
-This particular specification contains two occupancy covariates and two detection covariates, one of which is site-specific and one of which is visit-specific.
+This particular implementation contains two occupancy covariates and two detection covariates, one of which is unit-specific and one of which is visit-specific. Here *unit* refers to a *closure-unit*, the sampling unit over which closure is assumed. This corresponds to a site in a single-species model or a species-site in a multispecies model.
 
 ## The marginalized JAGS/BUGS model
-Our goal is to reparameterize the model to remove the latent occupancy state $Z$. To do so, we need to keep track of sites with at least one detection versus sites with none. For now, we can simply sort the sites in our data such that all $N$ sites with at least one detection come first, followed by the $n.site - N$ sites with no detections. We then split the likelihood into two parts—one for sites with at least one detection, and another for sites with no detections.
+Our goal is to reparameterize the model to remove the latent occupancy state $Z$. To do so, we need to keep track of units with at least one detection versus units with none. For now, we can simply sort the units in our data such that all $N$ units with at least one detection come first, followed by the $n\_unit - N$ units with no detections. We then split the likelihood into two parts: one for units with at least one detection, and another for units with no detections.
 
-### Sites with a detection
+### Units with a detection
 We know that $Z == 1$. Thus, we can write lines A and B of the likelihood above as:
 ```{r With detection, eval = F}
-ones[i] ~ dbern(psi[i])             # Line A; ones is simply a vector of ones.
-det.data[i,j] ~ dbern(theta[i,j])   # Line B
+1 ~ dbern(psi[i])             # Line A
+det_data[i,j] ~ dbern(theta[i,j])   # Line B
 ```
 This formulation has no $Z$ in it and thus no discrete unknowns!
 
-### Sites with no detection
+### Units with no detection
 Things are a bit trickier, because we don’t know whether $Z$ is one or zero. We do know, however, that $Z$ is either one or zero, but not both. Thus, the general strategy will be to write down the likelihood when $Z == 0$, then to write down the likelihood when $Z == 1$, and then to add those likelihoods together[^4].
 
 One way to observe the data is via a pathway where $Z == 0$. When $Z == 0$, line B does not matter, and only line A contributes to the likelihood. So the likelihood associated with this pathway corresponds to the statement:
 ```{r No detection 1, eval = F}
-zeros[i] ~ dbern(psi[i])            # Line A
+0 ~ dbern(psi[i])            # Line A
 ```
 or equivalently
 ```{r No detection 2, eval = F}
-ones[i] ~ dbern(1 - psi[i])         # Line A
+1 ~ dbern(1 - psi[i])         # Line A
 ```
 
-The other way to observe the data is via a pathway where $Z == 1$. In that case, both lines matter. Note that because the site has no detections, $det.data[i,j]$ is always zero, so we can write:
+The other way to observe the data is via a pathway where $Z == 1$. In that case, both lines matter. Note that because the unit has no detections, $det\_data[i,j]$ is always zero, so we can write:
 
 ```{r No detection 3, eval = F}
-ones[i] ~ dbern(psi[i]).    	# Because Z=1;		      line A
+ones[i] ~ dbern(psi[i])    	# Because Z=1;		      line A
 zeros[i] ~ dbern(theta[i,j])	# Because x[i,j] is zero    line B
 ```
 We rewrite the second line as:
@@ -73,35 +73,35 @@ ones[i] ~ dbern(1 – theta[i,j])			# line B
 ```
 Since detection (conditioned on covariates) on successive visits is independent[^5], we can multiply the probabilities[^6]. Note that we eliminate the loop over j and replace it with an explicit term for each visit.
 ```{r No detection 5, eval = F}
-ones[i] ~ dbern(psi[i] * (1 – theta[i,1]) * (1 - theta[i,2]) * ... * (1 - theta[i,n.visit]))			# line B
+ones[i] ~ dbern(psi[i] * (1 – theta[i,1]) * (1 - theta[i,2]) * ... * (1 - theta[i,n_visit]))			# line B
 ```
 Finally, we can combine the two cases ($Z == 1$ and $Z == 0$) in a single sampling statement by adding the probabilities[^7].
 ```{r No detection 6, eval = F}
-ones[i] ~ dbern(1-psi[i] + psi[i] * (1-theta[i,1]) * (1-theta[i,2]) * ... * (1-theta[i,n.visit]))  # lines A & B
+ones[i] ~ dbern(1-psi[i] + psi[i] * (1-theta[i,1]) * (1-theta[i,2]) * ... * (1-theta[i,n_visit]))  # lines A & B
 ```
-Putting it all together yields a full marginalized JAGS likelihood, shown here for a model with two occupancy covariates, two detection covariates, and four visits to each site.
+Putting it all together yields a full marginalized JAGS likelihood, shown here for a model with two occupancy covariates, two detection covariates, and four visits to each unit.
 ```{r Full marginalized likelihood, eval = F}
 for(i in 1:N){
   ones[i] ~ dbern(psi[i])
   logit(psi[i]) <- a0 + a1*cov1[i] + a2*cov2[i]
-  for(j in 1:n.visit){
-    det.data[i,j] ~ dbern(theta[i,j])
+  for(j in 1:n_visit){
+    det_data[i,j] ~ dbern(theta[i,j])
     logit(theta[i,j]) <- b0 + b1*cov1[i] + b2*cov3[i,j]
   }
 }
-for(i in (N+1):n.site){
+for(i in (N+1):n_unit){
   ones[i] ~ dbern(1-psi[i] + psi[i] * (1-theta[i,1]) * (1-theta[i,2]) * (1-theta[i,3]) * (1-theta[i,4]))
   logit(psi[i]) <- a0 + a1*cov1[i] + a2*cov2[i]
-  for(j in 1:n.visit){
+  for(j in 1:n_visit){
     logit(theta[i,j]) <- b0 + b1*cov1[i] + b2*cov3[i,j]
   }
 }
 ```
 Note that there are no $Z$'s in this likelihood!
 
-In my view, the key trick in the marginalization is splitting the likelihood at sites without detections into separate cases for $Z == 1$ and $Z == 0$, and then writing down a single statement that subsumes both paths towards observing a zero. Syntactically, this shows up as the elimination of sampling statements from the for-loop over the visits (the j-indexed for-loop over visits exists only to compute theta)[^8]. The crux of the marginalization is to remove $Z$ while nevertheless ensuring that the likelihood of the data for a single site cannot receive simultaneous contributions from $Z == 0$ on one visit and $Z == 1$ on another visit.
+In my view, the key trick in the marginalization is splitting the likelihood at units without detections into separate cases for $Z == 1$ and $Z == 0$, and then writing down a single statement that subsumes both paths towards observing a zero. Syntactically, this shows up as the elimination of sampling statements from the for-loop over the visits (the j-indexed for-loop over visits exists only to compute theta)[^8]. The crux of the marginalization is to remove $Z$ while nevertheless ensuring that the likelihood of the data for a single unit cannot receive simultaneous contributions from $Z == 0$ on one visit and $Z == 1$ on another visit.
 
-Once we fit the model, we can still recover our posterior Z-matrix.  Posterior $Z$ is one at every site with at least one detection. At every other site, the likelihood for $Z == 1$ is $\psi_i * \prod_{j = 1}^{n.visit} (1 - \theta_{ij})$, whereas the likelihood for $Z == 0$ is $1 - \psi_i$. Thus, posterior Z is one with probability $\frac{\psi_i * \prod_{j = 1}^{n.visit} (1 - \theta_{ij})}{(1 - \psi_i) + \psi_i * \prod_{j = 1}^{n.visit} (1 - \theta_{ij})}$ and zero otherwise.  So we just monitor `psi` and `theta` and compute the Z-matrix post-hoc.
+Once we fit the model, we can still recover our posterior Z-matrix.  Posterior $Z$ is one at every unit with at least one detection. At every other unit, the likelihood for $Z == 1$ is $\psi_i * \prod_{j = 1}^{n\_visit} (1 - \theta_{ij})$, whereas the likelihood for $Z == 0$ is $1 - \psi_i$. Thus, posterior Z is one with probability $\frac{\psi_i * \prod_{j = 1}^{n\_visit} (1 - \theta_{ij})}{(1 - \psi_i) + \psi_i * \prod_{j = 1}^{n\_visit} (1 - \theta_{ij})}$ and zero otherwise.  So we just monitor `psi` and `theta` and compute the Z-matrix post-hoc.
 
 [^4]: We can add the probabilities of mutually exclusive events to find the probability that exactly one of the events occurs.  In this case, two mutually exclusive events are **1)** [observed data AND $Z == 0$] and **2)** [observed data AND $Z == 1$]. Note that in addition to being mutually exclusive, these events are the only two ways that our observed data could have arisen, so the sum of these probabilities equals the likelihood of the observed data.
 [^5]: This is true by assumption in all "garden-variety" occupancy models.
@@ -139,9 +139,9 @@ All of these alternatives tell Stan exactly the same thing[^9].
 Another thing to know about Stan is that it contains an ‘if’ statement. The ‘if’ statement isn’t necessary to translate the marginalized single-species JAGS model to Stan, but it will be quite useful for a multi-species model[^10]. Therefore, we’ll use the ‘if’ statement from the very beginning. 
 
 ### The Stan likelihood
-To take advantage of the ‘if’ statement, we generate a new data variable Q such that $Q[i] = 1$ if there is at least one detection at site i, and $Q[i] = 0$ otherwise. (We generate Q external to Stan, in our R session or whatever we’re using). Then the likelihood looks like this:
+To take advantage of the ‘if’ statement, we generate a new data variable Q such that $Q[i] = 1$ if there is at least one detection at unit i, and $Q[i] = 0$ otherwise. (We generate Q external to Stan, in our R session or whatever we’re using). Then the likelihood looks like this:
 ```{r Stan likelihood, eval = F}
-for(i in 1:n_site){
+for(i in 1:n_unit){
   if(Q[i] == 1) {
     target += log(psi[i]);
     target += bernoulli_lpmf(det_data[i] | theta[i]); //vectorized over visits j
@@ -152,10 +152,10 @@ for(i in 1:n_site){
   }
 }
 ```
-Above, the first `target +=` statement is the `1 ~ dbern(psi)` statement; the second `target +=` is the `det.data[i,j] ~ dbern(theta[i,j])` statement; and the third `target +=` is the full contribution to the likelihood for a site where $Q[i] == 0$. The function `log_sum_exp()` takes two arguments.  Here, the first argument captures the contribution of the $Z == 1$ possibility, and the second argument captures the contribution of the $Z == 0$ possibility.
+Above, the first `target +=` statement is the `1 ~ dbern(psi)` statement; the second `target +=` is the `det_data[i,j] ~ dbern(theta[i,j])` statement; and the third `target +=` is the full contribution to the likelihood for a unit where $Q[i] == 0$. The function `log_sum_exp()` takes two arguments.  Here, the first argument captures the contribution of the $Z == 1$ possibility, and the second argument captures the contribution of the $Z == 0$ possibility.
 
 [^9]: Or close enough. For all I know there might be efficiency gains to be had by doing everything on one line (incrementing the log-likelihood once instead of multiple times), but if these exist they will be inconsequential for present purposes.
-[^10]: It should be obvious why we don’t want to rely on sorting the sites for the multi-species model, where different species will be detected at different sites. Yes, we *could* pass a complex data structure where every species has its own covariate tables that are properly sorted for that species’ detection history, but the ‘if’ statement makes things *so* much easier.
+[^10]: It should be obvious why we don’t want to rely on sorting the units for the multi-species model, where different species will be detected at different units. Yes, we *could* pass a complex data structure where every species has its own covariate tables that are properly sorted for that species’ detection history, but the ‘if’ statement makes things *so* much easier.
 
 ## Testing and benchmarking the parameterizations
 It doesn't really make sense to compare the Stan runtime against JAGS, because most of the Stan runtime is the one-time model compilation. However, it is quite interesting to compare the marginalized and non-marginalized JAGS models (and we show the full Stan model too, and make sure it gives the same parameter estimates!).
@@ -163,38 +163,37 @@ It doesn't really make sense to compare the Stan runtime against JAGS, because m
 ### Simulating covariates and data
 ```{r Data simulation}
 set.seed(3)
-inv.logit <- function(x){exp(x)/(1+exp(x))}
-n.site <- 200
-n.visit <- 4
+n_unit <- 200
+n_visit <- 4
 
 # generate covariate values
-site.covars <- data.frame(cov1 = rnorm(n.site), cov2 = rnorm(n.site))
-visit.covars <- as.data.frame(matrix(rnorm(n.site * n.visit), nrow = n.site))
+unit_covars <- data.frame(cov1 = rnorm(n_unit), cov2 = rnorm(n_unit))
+visit_covars <- as.data.frame(matrix(rnorm(n_unit * n_visit), nrow = n_unit))
 
 # specify coefficient values
-occ.int <- 0
-occ.beta1 <- .5     # to multiply by site.covars$cov1
-occ.beta2 <- -.5    # to multiply by site.covars$cov2
-det.int <- -.7
-det.beta1 <- .3     # to multiply by site.covars$cov1
-det.beta2 <- .3     # to multiply by visit.covars
+occ_int <- 0
+occ_beta1 <- .5     # to multiply by unit_covars$cov1
+occ_beta2 <- -.5    # to multiply by unit_covars$cov2
+det_int <- -.7
+det_beta1 <- .3     # to multiply by unit_covars$cov1
+det_beta2 <- .3     # to multiply by visit_covars
 
 # get linear predictors
-psi <- inv.logit(occ.int + occ.beta1*site.covars$cov1 + occ.beta2*site.covars$cov2)
-theta <- matrix(NA, nrow = n.site, ncol = n.visit)
+psi <- boot::inv.logit(occ_int + occ_beta1*unit_covars$cov1 + occ_beta2*unit_covars$cov2)
+theta <- matrix(NA, nrow = n_unit, ncol = n_visit)
 for(j in 1:4){
-  theta[, j] <- inv.logit(det.int + det.beta1*site.covars$cov1 + det.beta2*visit.covars[, j])
+  theta[, j] <- boot::inv.logit(det_int + det_beta1*unit_covars$cov1 + det_beta2*visit_covars[, j])
 }
 
 # simulate detection histories
 Z <- vector()
-for(i in 1:n.site){
+for(i in 1:n_unit){
   Z[i] <- rbinom(1, 1, psi[i])
 }
-det.data <- matrix(NA, nrow = n.site, ncol = n.visit)
-for(i in 1:n.site){
-  for(j in 1:n.visit){
-    det.data[i, j] <- Z[i]*rbinom(1,1,theta[i, j])
+det_data <- matrix(NA, nrow = n_unit, ncol = n_visit)
+for(i in 1:n_unit){
+  for(j in 1:n_visit){
+    det_data[i, j] <- Z[i]*rbinom(1,1,theta[i, j])
   }
 }
 ```
@@ -203,7 +202,7 @@ for(i in 1:n.site){
 library(rjags)
 library(dclone)
 set.seed(3)
-occu.model <- function() {
+occu_model <- function() {
   # Priors
   a0 ~ dnorm(0,0.001)
   a1 ~ dnorm(0,0.001)
@@ -213,19 +212,19 @@ occu.model <- function() {
   b2 ~ dnorm(0,0.001)
   
   # Likelihood
-  for(i in 1:n.site){
+  for(i in 1:n_unit){
     Z[i] ~ dbern(psi[i])
     logit(psi[i]) <- a0 + a1*cov1[i] + a2*cov2[i]
-    for(j in 1:n.visit){
-      det.data[i,j] ~ dbern(Z[i]*theta[i,j])
+    for(j in 1:n_visit){
+      det_data[i,j] ~ dbern(Z[i]*theta[i,j])
       logit(theta[i,j]) <- b0 + b1*cov1[i] + b2*cov3[i,j]
     }
   }
 }
 
-jags.data <- list(n.site = n.site, n.visit = n.visit, det.data = det.data, 
-                 cov1 = site.covars$cov1, cov2 = site.covars$cov2,
-                 cov3 = visit.covars)
+jags_data <- list(n_unit = n_unit, n_visit = n_visit, det_data = det_data, 
+                 cov1 = unit_covars$cov1, cov2 = unit_covars$cov2,
+                 cov3 = visit_covars)
 
 params <- c('a0', 'a1', 'a2', 'b0', 'b1', 'b2')
 
@@ -236,39 +235,39 @@ inits <- function() {
   b0 <- rnorm(1, 0, .5)
   b1 <- rnorm(1, 0, .5)
   b2 <- rnorm(1, 0, .5)
-  Z <- as.numeric(rowSums(det.data) > 0)
+  Z <- as.numeric(rowSums(det_data) > 0)
   return(list(a0 = a0, a1 = a1, a2 = a2, b0 = b0, b1 = b1, b2 = b2, Z = Z))
 }
 
 # run model
 nc <- 4
-n.adapt <- 1000
-n.burn <- 1000
-n.iter <- 3000
+n_adapt <- 1000
+n_burn <- 1000
+n_iter <- 3000
 thin <- 1
 
-occu.start.time = proc.time()
+occu_start_time = proc.time()
 cl <- makePSOCKcluster(nc)
 tmp <- clusterEvalQ(cl, library(dclone))
 parLoadModule(cl, "glm")
 parListModules(cl)
-occu.samples <- jags.parfit(cl, jags.data, params, occu.model, inits=inits, n.chains=nc, 
-                                     n.adapt=n.adapt, n.update = n.burn, thin = thin, n.iter = n.iter)
+occu_samples <- jags.parfit(cl, jags_data, params, occu_model, inits=inits, n.chains=nc, 
+                                     n.adapt=n_adapt, n.update = n_burn, thin = thin, n.iter = n_iter)
 stopCluster(cl)
-occu.end.time = proc.time()
-occu.dtime = occu.end.time - occu.start.time
+occu_end_time = proc.time()
+occu_dtime = occu_end_time - occu_start_time
 ```
 ### JAGS analysis: marginalized
 ```{r echo = T, results = 'hide', message = F}
-# First we sort the data so that sites with a detection come first
-N <- sum(rowSums(det.data) > 0)
-neworder <- rev(order(rowSums(det.data)))
-det.data2 <- det.data[neworder, ]
-site.covars2 <- site.covars[neworder, ]
-visit.covars2 <- visit.covars[neworder, ]
+# First we sort the data so that units with a detection come first
+N <- sum(rowSums(det_data) > 0)
+neworder <- rev(order(rowSums(det_data)))
+det_data2 <- det_data[neworder, ]
+unit_covars2 <- unit_covars[neworder, ]
+visit_covars2 <- visit_covars[neworder, ]
 
 # Now we fit the model
-margin.model <- function() {
+margin_model <- function() {
   # Priors
   a0 ~ dnorm(0,0.001)
   a1 ~ dnorm(0,0.001)
@@ -281,23 +280,23 @@ margin.model <- function() {
   for(i in 1:N){
     ones[i] ~ dbern(psi[i])
     logit(psi[i]) <- a0 + a1*cov1[i] + a2*cov2[i]
-    for(j in 1:n.visit){
-      det.data[i,j] ~ dbern(theta[i,j])
+    for(j in 1:n_visit){
+      det_data[i,j] ~ dbern(theta[i,j])
       logit(theta[i,j]) <- b0 + b1*cov1[i] + b2*cov3[i,j]
     }
   }
-  for(i in (N+1):n.site){
+  for(i in (N+1):n_unit){
     ones[i] ~ dbern(1-psi[i] + psi[i] * (1-theta[i,1]) * (1-theta[i,2]) * (1-theta[i,3]) * (1-theta[i,4]))
     logit(psi[i]) <- a0 + a1*cov1[i] + a2*cov2[i]
-    for(j in 1:n.visit){
+    for(j in 1:n_visit){
       logit(theta[i,j]) <- b0 + b1*cov1[i] + b2*cov3[i,j]
     }
   }
 }
 
-jags.data = list(n.site = n.site, n.visit = n.visit, det.data = det.data2, 
-                 cov1 = site.covars2$cov1, cov2 = site.covars2$cov2,
-                 cov3 = visit.covars2, N = N, ones = rep(1, n.site))
+jags_data = list(n_unit = n_unit, n_visit = n_visit, det_data = det_data2, 
+                 cov1 = unit_covars2$cov1, cov2 = unit_covars2$cov2,
+                 cov3 = visit_covars2, N = N, ones = rep(1, n_unit))
 
 params = c('a0', 'a1', 'a2', 'b0', 'b1', 'b2')
 
@@ -312,33 +311,33 @@ inits <- function() {
 }
 
 nc <- 4
-n.adapt <- 1000
-n.burn <- 1000
-n.iter <- 3000
+n_adapt <- 1000
+n_burn <- 1000
+n_iter <- 3000
 thin <- 1
 
-margin.start.time = proc.time()
+margin_start_time = proc.time()
 cl <- makePSOCKcluster(nc)
 tmp <- clusterEvalQ(cl, library(dclone))
 parLoadModule(cl, "glm")
 parListModules(cl)
-margin.samples <- jags.parfit(cl, jags.data, params, margin.model, inits=inits, n.chains=nc, 
-                            n.adapt=n.adapt, n.update = n.burn, thin = thin, n.iter = n.iter)
+margin_samples <- jags.parfit(cl, jags_data, params, margin_model, inits=inits, n.chains=nc, 
+                            n.adapt=n_adapt, n.update = n_burn, thin = thin, n.iter = n_iter)
 stopCluster(cl)
-margin.end.time = proc.time()
-margin.dtime = margin.end.time - margin.start.time
+margin_end_time = proc.time()
+margin_dtime = margin_end_time - margin_start_time
 ```
 ### Stan analysis
 ```{r echo = T, results = 'hide', message = F}
 library(rstan)
-stan.model <- 'data {
-  int<lower=0> n_site; //number of sites
+stan_model <- 'data {
+  int<lower=0> n_unit; //number of units
   int<lower=0> n_visit; //number of visits
-  int<lower=0, upper=1> det_data[n_site, n_visit]; //detection history
-  real<lower=0, upper=1> Q[n_site]; //at least one detection
-  real cov1[n_site]; //site covariate 1
-  real cov2[n_site]; //site covariate 2
-  real cov3[n_site, n_visit]; //visit covariate
+  int<lower=0, upper=1> det_data[n_unit, n_visit]; //detection history
+  real<lower=0, upper=1> Q[n_unit]; //at least one detection
+  real cov1[n_unit]; //unit covariate 1
+  real cov2[n_unit]; //unit covariate 2
+  real cov3[n_unit, n_visit]; //visit covariate
 }
 parameters {
   real a0; 
@@ -349,9 +348,9 @@ parameters {
   real b2;
 }
 transformed parameters{
-  real psi[n_site];
-  real theta[n_site, n_visit];
-  for(i in 1:n_site){
+  real psi[n_unit];
+  real theta[n_unit, n_visit];
+  for(i in 1:n_unit){
     psi[i] = inv_logit(a0 + a1 * cov1[i] + a2 * cov2[i]);
     for(j in 1:n_visit){
         theta[i,j] = inv_logit(b0 + b1 * cov1[i] + b2 * cov3[i,j]);
@@ -359,7 +358,7 @@ transformed parameters{
   }
 }
 model {
-  for(i in 1:n_site){
+  for(i in 1:n_unit){
     if(Q[i] == 1) {
       target += log(psi[i]);
       target += bernoulli_lpmf(det_data[i] | theta[i]); //vectorized over visits j
@@ -371,31 +370,31 @@ model {
   }
 }'
 
-stan.data <- list(n_site = n.site, n_visit = n.visit, det_data = det.data,
-                  cov1 = site.covars$cov1, cov2 = site.covars$cov2,
-                  cov3 = visit.covars, Q = as.numeric(rowSums(det.data)>0))
+stan_data <- list(n_unit = n_unit, n_visit = n_visit, det_data = det_data,
+                  cov1 = unit_covars$cov1, cov2 = unit_covars$cov2,
+                  cov3 = visit_covars, Q = as.numeric(rowSums(det_data)>0))
 
 nc <- 4
 
-stan.samples <- stan(model_code = stan.model, data = stan.data, iter = 4000, chains = nc, cores = nc)
+stan_samples <- stan(model_code = stan_model, data = stan_data, iter = 4000, chains = nc, cores = nc)
 ```
 ### Comparison and benchmarks
 The fitted posterior distributions are essentially identical:
 ```{r Parameter estimates}
-summary(occu.samples)
-summary(margin.samples)
-summary(stan.samples, pars = c('a0', 'a1', 'a2', 'b0', 'b1', 'b2'))$summary
+summary(occu_samples)
+summary(margin_samples)
+summary(stan_samples, pars = c('a0', 'a1', 'a2', 'b0', 'b1', 'b2'))$summary
 ```
 The effective sample sizes and r-hat (Gelman-Rubin) diagnostics are generally better in the marginalized JAGS model verus the "familiar" parameterization:
 ```{r diagnostics}
-effectiveSize(occu.samples)
-effectiveSize(margin.samples)
-gelman.diag(occu.samples)
-gelman.diag(margin.samples)
+effectiveSize(occu_samples)
+effectiveSize(margin_samples)
+gelman.diag(occu_samples)
+gelman.diag(margin_samples)
 ```
-The execution time is faster in the marginalized JAGS model versus the "familiar" parameterization. On different runs and different machines, I've seen speedup between 5 and 19 percent, which means that for some parameters the "familiar" JAGS model takes twice as long per effective sample as the marginalized model.
+The execution time is faster in the marginalized JAGS model versus the "familiar" parameterization. On different runs and different machines, I've seen speedup between 5 and 30 percent, which means that for some parameters the "familiar" JAGS model takes twice as long per effective sample as the marginalized model.
 ```{r exec time}
-occu.dtime
-margin.dtime
-(margin.dtime - occu.dtime)/occu.dtime
+occu_dtime
+margin_dtime
+(margin_dtime - occu_dtime)/occu_dtime
 ```
