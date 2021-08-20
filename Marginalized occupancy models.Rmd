@@ -2,12 +2,14 @@
 title: "Marginalized occupancy models: a how-to for JAGS and Stan"
 author: "Jacob Socolar"
 date: "6/23/2019, updated 7-9-2019"
-knit: (function(input_file, encoding) {
-  out_dir <- 'docs';
-  rmarkdown::render(input_file,
- encoding=encoding,
- output_file=file.path(dirname(input_file), out_dir, 'index.html'))})
-output: html_document
+knit: (function(inputFile, encoding) { 
+              rmarkdown::render(inputFile, encoding = encoding, 
+              output_file = file.path(dirname(inputFile), 'index.html')) })
+output: 
+  html_document:
+    toc: true
+    toc_float:
+      toc_collapsed: true
 ---
 
 ## Introduction
